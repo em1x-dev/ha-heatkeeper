@@ -122,6 +122,94 @@ async def test_disable_zone(hass, entry, calls) -> None:
     assert _state(hass, "sensor.heatkeeper_room_zone_status") == "disabled"
 
 
+ROOM_STATUS = "sensor.heatkeeper_room_zone_status"
+
+
+async def _heating_room(hass, calls) -> None:
+    """Room heating in maintain mode; the kitchen stays out of the way."""
+    await _number(hass, "number.heatkeeper_kitchen_maintain_target", 19)
+    await _select(hass, "maintain")
+    await _set(hass, "input_boolean.h1", "on")
+    calls["on"].clear()
+    calls["off"].clear()
+    assert _state(hass, ROOM_STATUS) == "heating"
+
+
+async def test_external_off_is_respected(hass, entry, calls, freezer) -> None:
+    """A heater switched off from outside stays off, even in a cold room."""
+    await _heating_room(hass, calls)
+    await _set(hass, "input_boolean.h1", "off")
+    await _set(hass, "sensor.t1", "15.0")
+    await _tick(hass, freezer, minutes=5)
+    assert _targets(calls, "on") == []
+    assert _state(hass, ROOM_STATUS) == "manual_off"
+
+
+async def test_turning_back_on_resumes_control(hass, entry, calls) -> None:
+    """After the plug is turned on again the normal cycle applies."""
+    await _heating_room(hass, calls)
+    await _set(hass, "input_boolean.h1", "off")
+    await _set(hass, "input_boolean.h1", "on")
+    assert _state(hass, ROOM_STATUS) == "heating"
+    await _set(hass, "sensor.t1", "21.5")
+    assert _targets(calls, "off") == ["input_boolean.h1"]
+    await _set(hass, "input_boolean.h1", "off")  # our own off is not a manual one
+    assert _state(hass, ROOM_STATUS) == "idle"
+    await _set(hass, "sensor.t1", "20.5")
+    assert _targets(calls, "on") == ["input_boolean.h1"]
+
+
+async def test_mode_change_resumes_heating(hass, entry, calls) -> None:
+    """Changing the mode clears a manual off."""
+    await _heating_room(hass, calls)
+    await _set(hass, "input_boolean.h1", "off")
+    await _select(hass, "tariff")
+    assert "input_boolean.h1" in _targets(calls, "on")
+
+
+async def test_external_off_cancels_boost_and_boost_overrides(hass, entry, calls) -> None:
+    """Off during one-shot heat cancels it; a new one-shot heat heats again."""
+    await _number(hass, "number.heatkeeper_room_maintain_target", 15)
+    await _select(hass, "maintain")
+    await _switch(hass, "switch.heatkeeper_room_boost", True)
+    await _set(hass, "input_boolean.h1", "on")
+    calls["on"].clear()
+    await _set(hass, "input_boolean.h1", "off")
+    assert _state(hass, ROOM_STATUS) == "manual_off"
+    assert _state(hass, "switch.heatkeeper_room_boost") == "off"
+    assert _targets(calls, "on") == []
+    await _switch(hass, "switch.heatkeeper_room_boost", True)
+    assert _targets(calls, "on") == ["input_boolean.h1"]
+
+
+async def test_plug_power_loss_is_not_manual_off(hass, entry, calls) -> None:
+    """A plug that went unavailable and came back off is turned on again."""
+    await _heating_room(hass, calls)
+    await _set(hass, "input_boolean.h1", "unavailable")
+    await _set(hass, "input_boolean.h1", "off")
+    assert _targets(calls, "on") == ["input_boolean.h1"]
+
+
+async def test_outage_clears_manual_off(hass, entry, calls) -> None:
+    """A plug reporting off right before an outage is detected does not stay held."""
+    await _heating_room(hass, calls)
+    await _set(hass, "input_boolean.h1", "off")
+    assert _state(hass, ROOM_STATUS) == "manual_off"
+    await _set(hass, "binary_sensor.grid", "off")
+    await _set(hass, "binary_sensor.grid", "on")
+    assert _state(hass, ROOM_STATUS) != "manual_off"
+
+
+async def test_manual_off_survives_reload(hass, entry, calls) -> None:
+    """The decision to keep a heater off is persisted."""
+    await _heating_room(hass, calls)
+    await _set(hass, "input_boolean.h1", "off")
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert _targets(calls, "on") == []
+    assert _state(hass, ROOM_STATUS) == "manual_off"
+
+
 async def test_mode2_schedule_and_presence(hass, entry, calls, freezer) -> None:
     """Night, pre-morning boost, and day targets from room / global presence."""
     await _select(hass, "tariff")
