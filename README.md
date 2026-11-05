@@ -60,6 +60,20 @@ Every target is set **per room**. The hysteresis (±) is shared.
      Each room first heats to its *after-outage target* (`0` = skip), then returns to normal maintenance;
    - **auto restore off** → **paused** until you press **Resume heating**.
 
+### Turning a heater off by hand
+
+If a heater is switched off while it is heating (by its plug, a button or another automation),
+HeatKeeper leaves it off and the room status becomes **Turned off manually**, however cold the room gets.
+
+- **Heating resumes** when someone turns the plug back on, the mode changes, the room's "Control enabled"
+  switch is toggled, one-shot heat is started or a power outage is detected.
+- A running one-shot heat is cancelled.
+- This survives Home Assistant restarts.
+- A heater that is already off cannot be "held" this way: use "Control enabled" to keep a room from starting.
+- HeatKeeper still turns off a heater that is on above the target.
+- Without a grid entity, a plug that lost power and came back reporting a plain `off`
+  (without going `unavailable` first) looks like a manual off.
+
 ### One-shot heat
 
 There is a **One-shot heat** switch for every room and one for the whole home.

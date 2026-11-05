@@ -18,6 +18,7 @@ from homeassistant.const import (
     ATTR_ENTITY_ID,
     SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
+    STATE_OFF,
     STATE_ON,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
@@ -107,6 +108,7 @@ from .const import (
     ZONE_DISABLED,
     ZONE_HEATING,
     ZONE_IDLE,
+    ZONE_MANUAL_OFF,
     ZONE_NO_SENSOR,
     ZONE_OFF,
     ZONE_SCHEDULED,
@@ -158,6 +160,9 @@ class Zone:
     recovering: bool = False
     start_after: datetime | None = None
     force_off_once: bool = False
+    # The heater was switched off from outside while heating: do not turn it
+    # back on until someone else does.
+    held_off: bool = False
     target: float | None = None
     status: str = ZONE_IDLE
     current_temperature: float | None = None
@@ -255,6 +260,9 @@ class HeatKeeperController:
         for zid, state in (data.get("boost") or {}).items():
             if zid in self.zones and state in (BOOST_ACTIVE, BOOST_QUEUED):
                 self.zones[zid].boost = state
+        for zid in data.get("held_off") or []:
+            if zid in self.zones:
+                self.zones[zid].held_off = True
         if self.grid_entity:
             self.phase = data.get("phase", PHASE_NORMAL)
             if restored := data.get("restored_at"):
@@ -269,13 +277,17 @@ class HeatKeeperController:
     def async_start(self) -> None:
         """Start listening to state changes and the evaluation timer."""
         watched = [eid for eid in (self.tariff_entity, self.grid_entity) if eid]
+        heaters: dict[str, Zone] = {}
         for zone in self.zones.values():
+            heaters[zone.heater] = zone
             watched.extend([zone.heater, zone.temperature_entity])
             if zone.humidity_entity:
                 watched.append(zone.humidity_entity)
 
         @callback
         def _state_changed(event: Event) -> None:
+            if heater_zone := heaters.get(event.data["entity_id"]):
+                self._track_external_off(heater_zone, event)
             self.async_request_evaluate()
 
         @callback
@@ -313,6 +325,7 @@ class HeatKeeperController:
             "settings": self.settings,
             "zones": self.zone_settings,
             "boost": {z.id: z.boost for z in self.zones.values() if z.boost},
+            "held_off": [z.id for z in self.zones.values() if z.held_off],
             "phase": self.phase,
             "restored_at": self.restored_at.isoformat() if self.restored_at else None,
         }
@@ -350,10 +363,12 @@ class HeatKeeperController:
     async def async_set_zone_setting(self, zone_id: str, key: str, value: Any) -> None:
         """Change a per-zone setting."""
         self.zone_settings[zone_id][key] = value
-        if key == Z_ENABLED and not value:
+        if key == Z_ENABLED:
             zone = self.zones[zone_id]
-            zone.force_off_once = True
-            zone.boost = None
+            zone.held_off = False
+            if not value:
+                zone.force_off_once = True
+                zone.boost = None
         self._save()
         await self.async_evaluate()
 
@@ -367,6 +382,7 @@ class HeatKeeperController:
         for zone in self._select_zones(zone_id):
             if self.zone_settings[zone.id][Z_ENABLED] and not zone.boost:
                 zone.boost = state
+                zone.held_off = False
         self._save()
         await self.async_evaluate()
 
@@ -428,8 +444,30 @@ class HeatKeeperController:
             self.phase = PHASE_NORMAL
         for zone in self.zones.values():
             zone.recovering = False
+            zone.held_off = False
             if mode == MODE_OFF:
                 zone.force_off_once = True
+
+    @callback
+    def _track_external_off(self, zone: Zone, event: Event) -> None:
+        """Respect a heater switched off from outside while it was heating.
+
+        Our own off commands never match: the zone status has already left
+        heating/boost by the time they are sent. Going through unavailable
+        (the plug lost power) does not match either.
+        """
+        old = event.data["old_state"]
+        new = event.data["new_state"]
+        if (
+            old is not None
+            and new is not None
+            and old.state == STATE_ON
+            and new.state == STATE_OFF
+            and zone.status in (ZONE_HEATING, ZONE_BOOST)
+        ):
+            _LOGGER.debug("%s: heater switched off from outside", zone.name)
+            zone.held_off = True
+            self._save()
 
     # ------------------------------------------------------------------
     # Reading external entities
@@ -562,6 +600,9 @@ class HeatKeeperController:
                         zone.boost = None
                     zone.recovering = False
                     zone.start_after = None
+                    # A plug that lost power may report plain "off": not a
+                    # decision by anyone, so it must not stop heating later.
+                    zone.held_off = False
                 self._save()
             return
 
@@ -663,6 +704,18 @@ class HeatKeeperController:
         if mode == MODE_TARIFF_OUTAGE and (waiting_power or staggered):
             zone.status = ZONE_SCHEDULED if zone.boost else ZONE_BLOCKED
             return False
+
+        if zone.held_off:
+            if not self._heater_on(zone):
+                zone.status = ZONE_MANUAL_OFF
+                zone.recovering = False
+                if zone.boost:
+                    zone.boost = None
+                    self._save()
+                return None
+            # Someone turned it back on: normal control resumes.
+            zone.held_off = False
+            self._save()
 
         if temp is None:
             # Never heat blind.

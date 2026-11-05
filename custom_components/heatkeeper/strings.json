@@ -231,7 +231,8 @@
           "day_off": "No day heating",
           "disabled": "Disabled",
           "no_sensor": "No sensor data",
-          "blocked": "No power"
+          "blocked": "No power",
+          "manual_off": "Turned off manually"
         }
       },
       "zone_target": {

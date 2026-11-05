@@ -61,6 +61,7 @@ const STATUS_STYLE = {
   blocked: { color: "var(--error-color, #db4437)", icon: "mdi:power-plug-off" },
   no_sensor: { color: "var(--error-color, #db4437)", icon: "mdi:thermometer-off" },
   disabled: { color: "var(--disabled-color, #bdbdbd)", icon: "mdi:radiator-off" },
+  manual_off: { color: "var(--warning-color, #ffa600)", icon: "mdi:radiator-off" },
   off: { color: "var(--disabled-color, #bdbdbd)", icon: "mdi:radiator-off" },
   day_off: { color: "var(--disabled-color, #bdbdbd)", icon: "mdi:radiator-disabled" },
   idle: { color: "var(--state-inactive-color, #7c8a95)", icon: "mdi:radiator" },
