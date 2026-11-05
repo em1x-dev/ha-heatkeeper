@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "heatkeeper"
-VERSION: Final = "0.2.2"
+VERSION: Final = "0.2.3"
 STORAGE_VERSION: Final = 1
 
 # Config entry options: external entities the controller reads.
