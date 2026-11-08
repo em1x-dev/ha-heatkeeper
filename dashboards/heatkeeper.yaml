@@ -31,6 +31,19 @@ views:
             features:
               - type: toggle
           - type: tile
+            entity: switch.heatkeeper_heater_limit
+            features:
+              - type: toggle
+          - type: tile
+            entity: number.heatkeeper_max_heaters
+            visibility:
+              - condition: state
+                entity: switch.heatkeeper_heater_limit
+                state: "on"
+            features:
+              - type: numeric-input
+                style: buttons
+          - type: tile
             entity: button.heatkeeper_resume
             visibility:
               - condition: state

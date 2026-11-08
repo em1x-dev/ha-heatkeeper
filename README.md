@@ -70,6 +70,25 @@ the coldest room relative to its target first. A room waiting for its turn shows
 
 This smooths the moment of switching on only: once all rooms are heating, the total load is the same.
 
+### Heater limit
+
+Limits how many heaters may heat at the same time, e.g. while a boiler, a charging station or a
+washing machine run after an outage. Turn on **Heater limit** (`switch.heatkeeper_heater_limit`) by hand
+or from an automation and set **Heater limit: max at once** (`number.heatkeeper_max_heaters`, `0` = none).
+
+- Of the rooms that need heat, the ones furthest below their target heat. A room without an owner
+  counts as warmer by **Heater limit: no-owner room handicap** (1° by default), so rooms with an owner go first.
+- Rooms take turns. A room keeps its slot for at least **Heater limit: min run time** (10 min) once it heats,
+  and a waiting room takes the slot only when it is further below its target than a heating one
+  by **Heater limit: swap margin** (0.3°).
+- A room left out shows **Waiting for its turn**; its heater is switched off.
+- Turning the limit on, or lowering it, switches extra heaters off at once, ignoring the min run time.
+- Rooms turned off by hand and disabled rooms do not count.
+- One-shot heat goes first.
+
+The limit counts heaters, not watts: HeatKeeper does not see other appliances. Your automation decides
+when to turn the limit on and how many heaters fit.
+
 ### Turning a heater off by hand
 
 If a heater is switched off while it is heating (by its plug, a button or another automation),
@@ -136,6 +155,8 @@ Entity ids do not depend on the UI language. `<room>` is the room name as a slug
 | `time.heatkeeper_cheap_start`, `time.heatkeeper_cheap_end`, `number.heatkeeper_preheat_lead` | Cheap tariff: start, end, boost before end |
 | `switch.heatkeeper_auto_restore`, `number.heatkeeper_restore_delay` | Outage: auto restore, delay |
 | `number.heatkeeper_restore_stagger` | Stagger between room starts |
+| `switch.heatkeeper_heater_limit`, `number.heatkeeper_max_heaters` | Heater limit: on/off, max at once |
+| `number.heatkeeper_limit_min_run`, `number.heatkeeper_limit_swap_margin`, `number.heatkeeper_limit_no_owner_penalty` | Heater limit: min run time, swap margin, no-owner room handicap |
 | `sensor.heatkeeper_status`, `binary_sensor.heatkeeper_cheap_tariff`, `binary_sensor.heatkeeper_grid`, `sensor.heatkeeper_restore_at` | Status |
 
 **Each room:**

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "heatkeeper"
-VERSION: Final = "0.2.3"
+VERSION: Final = "0.2.4"
 STORAGE_VERSION: Final = 1
 
 # Config entry options: external entities the controller reads.
@@ -104,6 +104,14 @@ S_CHEAP_START: Final = "cheap_start"
 S_CHEAP_END: Final = "cheap_end"
 S_PRESENCE: Final = "presence"
 S_PRESENCE_AUTO: Final = "presence_auto"
+S_HEATER_LIMIT: Final = "heater_limit"
+S_MAX_HEATERS: Final = "max_heaters"
+# A room keeps its slot at least this long (min) once it heats.
+S_LIMIT_MIN_RUN: Final = "limit_min_run"
+# A waiting room takes a slot only when colder by this margin (°C, vs target).
+S_LIMIT_SWAP_MARGIN: Final = "limit_swap_margin"
+# Rooms without an owner count as this much warmer (°C).
+S_LIMIT_NO_OWNER_PENALTY: Final = "limit_no_owner_penalty"
 
 DEFAULT_SETTINGS: Final[dict] = {
     S_MODE: MODE_OFF,
@@ -116,6 +124,11 @@ DEFAULT_SETTINGS: Final[dict] = {
     S_CHEAP_END: "07:00:00",
     S_PRESENCE: True,
     S_PRESENCE_AUTO: False,
+    S_HEATER_LIMIT: False,
+    S_MAX_HEATERS: 2,
+    S_LIMIT_MIN_RUN: 10,
+    S_LIMIT_SWAP_MARGIN: 0.3,
+    S_LIMIT_NO_OWNER_PENALTY: 1.0,
 }
 
 # Per-zone settings.

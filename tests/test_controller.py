@@ -243,6 +243,77 @@ async def test_stagger_zero_starts_together(hass, entry, calls) -> None:
     assert sorted(_targets(calls, "on")) == ["input_boolean.h1", "input_boolean.h2"]
 
 
+async def _limit(hass: HomeAssistant, max_heaters: int) -> None:
+    await _number(hass, "number.heatkeeper_max_heaters", max_heaters)
+    await _switch(hass, "switch.heatkeeper_heater_limit", True)
+
+
+async def test_limit_heats_neediest_room(hass, entry, calls) -> None:
+    """With a limit of 1 only the room furthest below its target heats."""
+    await _no_stagger(hass)
+    await _limit(hass, 1)
+    await _set(hass, "sensor.t2", "18.0")  # kitchen 3 below, minus 1 for no owner
+    await _select(hass, "maintain")
+    assert _targets(calls, "on") == ["input_boolean.h2"]
+    assert _state(hass, ROOM_STATUS) == "queued"
+
+
+async def test_limit_rotates_after_min_run(hass, entry, calls, freezer) -> None:
+    """A colder waiting room takes the slot, but not before the minimum run time."""
+    await _no_stagger(hass)
+    await _limit(hass, 1)
+    await _set(hass, "sensor.t2", "18.0")
+    await _select(hass, "maintain")
+    await _set(hass, "input_boolean.h2", "on")
+    await _set(hass, "sensor.t1", "17.0")  # room now needs heat more
+    await _tick(hass, freezer, minutes=5)
+    assert _targets(calls, "off") == []
+    await _tick(hass, freezer, minutes=6)
+    assert _targets(calls, "off") == ["input_boolean.h2"]
+    assert _targets(calls, "on") == ["input_boolean.h2", "input_boolean.h1"]
+    assert _state(hass, KITCHEN_STATUS) == "queued"
+
+
+async def test_limit_cuts_running_heaters_at_once(hass, entry, calls) -> None:
+    """Turning the limit on switches extra heaters off, even recently started ones."""
+    await _no_stagger(hass)
+    await _select(hass, "maintain")
+    await _set(hass, "input_boolean.h1", "on")
+    await _set(hass, "input_boolean.h2", "on")
+    await _limit(hass, 1)
+    # Same deficit: the kitchen has no owner, so it gives way.
+    assert _targets(calls, "off") == ["input_boolean.h2"]
+    assert _state(hass, ROOM_STATUS) == "heating"
+    await _number(hass, "number.heatkeeper_max_heaters", 0)
+    assert _targets(calls, "off") == ["input_boolean.h2", "input_boolean.h1"]
+
+
+async def test_limit_settings_from_ui(hass, entry, calls, freezer) -> None:
+    """No-owner handicap and min run time come from the number entities."""
+    await _no_stagger(hass)
+    await _number(hass, "number.heatkeeper_limit_no_owner_penalty", 0)
+    await _number(hass, "number.heatkeeper_limit_min_run", 0)
+    await _limit(hass, 1)
+    await _set(hass, "sensor.t2", "19.5")  # kitchen 1.5 below, room 1.0 below
+    await _select(hass, "maintain")
+    assert _targets(calls, "on") == ["input_boolean.h2"]  # 1° handicap would pick the room
+    await _set(hass, "input_boolean.h2", "on")
+    await _set(hass, "sensor.t1", "19.0")  # room 2.0 below: swaps at once
+    await _tick(hass, freezer, seconds=30)
+    assert _targets(calls, "off") == ["input_boolean.h2"]
+    assert _targets(calls, "on") == ["input_boolean.h2", "input_boolean.h1"]
+
+
+async def test_limit_off_restores_all(hass, entry, calls) -> None:
+    """Switching the limit off lets every room heat again."""
+    await _no_stagger(hass)
+    await _limit(hass, 0)
+    await _select(hass, "maintain")
+    assert _targets(calls, "on") == []
+    await _switch(hass, "switch.heatkeeper_heater_limit", False)
+    assert sorted(_targets(calls, "on")) == ["input_boolean.h1", "input_boolean.h2"]
+
+
 async def test_mode2_schedule_and_presence(hass, entry, calls, freezer) -> None:
     """Night, pre-morning boost, and day targets from room / global presence."""
     await _select(hass, "tariff")
