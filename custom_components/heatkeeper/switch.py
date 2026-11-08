@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import HeatKeeperConfigEntry
 from .const import (
     S_AUTO_RESTORE,
+    S_HEATER_LIMIT,
     S_PRESENCE,
     S_PRESENCE_AUTO,
     Z_DAY_HEATING,
@@ -36,6 +37,7 @@ async def async_setup_entry(
         GlobalBoostSwitch(c, BOOST, translation_key="boost_all"),
         SettingSwitch(c, S_PRESENCE_AUTO, "mdi:account-multiple-check"),
         SettingSwitch(c, S_AUTO_RESTORE, "mdi:restart"),
+        LimitSwitch(c, S_HEATER_LIMIT, "mdi:car-speed-limiter"),
     ]
     for zone in c.zones.values():
         entities.append(ZoneSettingSwitch(c, zone, Z_ENABLED, "mdi:radiator"))
@@ -69,6 +71,12 @@ class SettingSwitch(HeatKeeperEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable."""
         await self._controller.async_set_setting(self._key, False)
+
+
+class LimitSwitch(SettingSwitch):
+    """Heater limit: meant to be switched by automations, so not a config entity."""
+
+    _attr_entity_category = None
 
 
 class GlobalPresenceSwitch(HeatKeeperEntity, SwitchEntity):

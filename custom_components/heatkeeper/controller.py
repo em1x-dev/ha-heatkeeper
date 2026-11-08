@@ -74,6 +74,11 @@ from .const import (
     S_CHEAP_END,
     S_CHEAP_START,
     S_DELTA,
+    S_HEATER_LIMIT,
+    S_LIMIT_MIN_RUN,
+    S_LIMIT_NO_OWNER_PENALTY,
+    S_LIMIT_SWAP_MARGIN,
+    S_MAX_HEATERS,
     S_MODE,
     S_PREHEAT_LEAD,
     S_PRESENCE,
@@ -168,6 +173,8 @@ class Zone:
     status: str = ZONE_IDLE
     current_temperature: float | None = None
     last_command: tuple[bool, datetime] | None = field(default=None, repr=False)
+    # When the heater was last seen switching on (for the heater limit).
+    on_since: datetime | None = field(default=None, repr=False)
     # Entity ids of this zone's entities, keyed by entity key (for the card).
     entity_ids: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -816,6 +823,40 @@ class HeatKeeperController:
             _LOGGER.exception("Failed to switch heater %s", zone.heater)
             return False
 
+    def _limit_score(self, zone: Zone) -> float:
+        """How much a room needs heat: degrees below target, owners first."""
+        score = (zone.target or 0) - (zone.current_temperature or 0)
+        if not zone.own_presence:
+            score -= self.settings[S_LIMIT_NO_OWNER_PENALTY]
+        if zone.boost == BOOST_ACTIVE:
+            score += 100  # asked for explicitly
+        return score
+
+    def _apply_limit(self, wants: list[Zone], now: datetime) -> list[Zone]:
+        """Rooms allowed to heat while the heater limit is on.
+
+        A room that started recently keeps its slot for the minimum run time;
+        otherwise a waiting room takes a slot only when it needs heat more than
+        a heating one by the swap margin. The limit itself always wins.
+        """
+        if not self.settings[S_HEATER_LIMIT]:
+            return wants
+        limit = max(int(self.settings[S_MAX_HEATERS]), 0)
+        if len(wants) <= limit:
+            return wants
+
+        def rank(zone: Zone) -> tuple[bool, float]:
+            running = bool(self._heater_on(zone)) or self._command_pending(
+                zone, True, now
+            )
+            locked = zone.on_since is not None and now - zone.on_since < timedelta(
+                minutes=self.settings[S_LIMIT_MIN_RUN]
+            )
+            margin = self.settings[S_LIMIT_SWAP_MARGIN] if running else 0
+            return (locked, self._limit_score(zone) + margin)
+
+        return sorted(wants, key=rank, reverse=True)[:limit]
+
     def _start_allowed(self, now: datetime) -> bool:
         return (
             not self.settings[S_RESTORE_STAGGER]
@@ -847,14 +888,29 @@ class HeatKeeperController:
         self.cheap = self._is_cheap(now_local)
         self._update_grid(now)
 
-        starts: list[Zone] = []
+        wants: list[Zone] = []
         for zone in self.zones.values():
+            if self._heater_on(zone):
+                zone.on_since = zone.on_since or now
+            else:
+                zone.on_since = None
             desired = self._decide(zone, now, now_local)
-            if desired and self._heater_on(zone) is False:
-                starts.append(zone)
+            if desired:
+                wants.append(zone)
             else:
                 await self._safe_apply(zone, desired, now)
             zone.force_off_once = False
+
+        allowed = self._apply_limit(wants, now)
+        starts: list[Zone] = []
+        for zone in wants:
+            if zone not in allowed:
+                zone.status = ZONE_QUEUED
+                await self._safe_apply(zone, False, now)
+            elif self._heater_on(zone) is False:
+                starts.append(zone)
+            else:
+                await self._safe_apply(zone, True, now)
 
         # Start heaters one by one, the coldest (relative to its target) first,
         # so many rooms switching on together do not hit the supply at once.

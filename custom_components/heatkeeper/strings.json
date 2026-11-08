@@ -129,6 +129,18 @@
       }
     },
     "number": {
+      "max_heaters": {
+        "name": "Heater limit: max at once"
+      },
+      "limit_min_run": {
+        "name": "Heater limit: min run time"
+      },
+      "limit_swap_margin": {
+        "name": "Heater limit: swap margin"
+      },
+      "limit_no_owner_penalty": {
+        "name": "Heater limit: no-owner room handicap"
+      },
       "delta": {
         "name": "Hysteresis (±)"
       },
@@ -172,6 +184,9 @@
       },
       "boost_all": {
         "name": "One-shot heat"
+      },
+      "heater_limit": {
+        "name": "Heater limit"
       },
       "auto_restore": {
         "name": "Outage: auto restore"
