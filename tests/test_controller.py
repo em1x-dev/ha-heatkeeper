@@ -125,8 +125,14 @@ async def test_disable_zone(hass, entry, calls) -> None:
 ROOM_STATUS = "sensor.heatkeeper_room_zone_status"
 
 
+async def _no_stagger(hass: HomeAssistant) -> None:
+    """Start heaters at once; for tests about other logic."""
+    await _number(hass, "number.heatkeeper_restore_stagger", 0)
+
+
 async def _heating_room(hass, calls) -> None:
     """Room heating in maintain mode; the kitchen stays out of the way."""
+    await _no_stagger(hass)
     await _number(hass, "number.heatkeeper_kitchen_maintain_target", 19)
     await _select(hass, "maintain")
     await _set(hass, "input_boolean.h1", "on")
@@ -169,6 +175,7 @@ async def test_mode_change_resumes_heating(hass, entry, calls) -> None:
 
 async def test_external_off_cancels_boost_and_boost_overrides(hass, entry, calls) -> None:
     """Off during one-shot heat cancels it; a new one-shot heat heats again."""
+    await _no_stagger(hass)
     await _number(hass, "number.heatkeeper_room_maintain_target", 15)
     await _select(hass, "maintain")
     await _switch(hass, "switch.heatkeeper_room_boost", True)
@@ -208,6 +215,32 @@ async def test_manual_off_survives_reload(hass, entry, calls) -> None:
     await hass.async_block_till_done()
     assert _targets(calls, "on") == []
     assert _state(hass, ROOM_STATUS) == "manual_off"
+
+
+KITCHEN_STATUS = "sensor.heatkeeper_kitchen_zone_status"
+
+
+async def test_heaters_start_one_by_one(hass, entry, calls, freezer) -> None:
+    """Rooms needing heat together start spaced by the stagger, coldest first."""
+    await _set(hass, "sensor.t2", "18.0")  # kitchen is colder than the room
+    await _select(hass, "maintain")
+    assert _targets(calls, "on") == ["input_boolean.h2"]
+    assert _state(hass, ROOM_STATUS) == "queued"
+    await _set(hass, "input_boolean.h2", "on")
+    await _tick(hass, freezer, seconds=10)
+    assert _targets(calls, "on") == ["input_boolean.h2"]
+    await _tick(hass, freezer, seconds=21)
+    assert _targets(calls, "on") == ["input_boolean.h2", "input_boolean.h1"]
+    await _set(hass, "input_boolean.h1", "on")
+    assert _state(hass, ROOM_STATUS) == "heating"
+    assert _state(hass, KITCHEN_STATUS) == "heating"
+
+
+async def test_stagger_zero_starts_together(hass, entry, calls) -> None:
+    """With the stagger set to 0 every heater starts at once."""
+    await _number(hass, "number.heatkeeper_restore_stagger", 0)
+    await _select(hass, "maintain")
+    assert sorted(_targets(calls, "on")) == ["input_boolean.h1", "input_boolean.h2"]
 
 
 async def test_mode2_schedule_and_presence(hass, entry, calls, freezer) -> None:
@@ -289,6 +322,7 @@ async def test_boost_switch_turns_itself_off(hass, entry, calls) -> None:
 
 async def test_boost_all_and_cancel(hass, entry, calls) -> None:
     """The global switch starts and cancels every room."""
+    await _no_stagger(hass)
     await _switch(hass, "switch.heatkeeper_boost", True)
     assert set(_targets(calls, "on")) == {"input_boolean.h1", "input_boolean.h2"}
     await _set(hass, "input_boolean.h1", "on")
@@ -393,6 +427,7 @@ async def test_mode3_manual_resume(hass, entry, calls, freezer) -> None:
 
 async def test_grid_ignored_for_heating_in_mode2(hass, entry, calls, freezer) -> None:
     """Regular heating only checks the grid in mode 3."""
+    await _no_stagger(hass)
     await _tick(hass, freezer, minutes=5)
     await _set(hass, "binary_sensor.grid", "off")
     await _select(hass, "maintain")

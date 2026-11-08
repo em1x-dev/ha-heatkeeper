@@ -58,6 +58,7 @@ const STATUS_STYLE = {
   heating: { color: "var(--state-climate-heat-color, #ff8100)", icon: "mdi:radiator" },
   boost: { color: "var(--state-climate-heat-color, #ff8100)", icon: "mdi:fire" },
   scheduled: { color: "var(--warning-color, #ffa600)", icon: "mdi:clock-outline" },
+  queued: { color: "var(--warning-color, #ffa600)", icon: "mdi:timer-sand" },
   blocked: { color: "var(--error-color, #db4437)", icon: "mdi:power-plug-off" },
   no_sensor: { color: "var(--error-color, #db4437)", icon: "mdi:thermometer-off" },
   disabled: { color: "var(--disabled-color, #bdbdbd)", icon: "mdi:radiator-off" },

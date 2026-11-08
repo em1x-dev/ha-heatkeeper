@@ -139,7 +139,7 @@
         "name": "Outage: delay after power returns"
       },
       "restore_stagger": {
-        "name": "Outage: stagger between rooms"
+        "name": "Stagger between room starts"
       },
       "maintain_target": {
         "name": "Target: maintain"
@@ -232,7 +232,8 @@
           "disabled": "Disabled",
           "no_sensor": "No sensor data",
           "blocked": "No power",
-          "manual_off": "Turned off manually"
+          "manual_off": "Turned off manually",
+          "queued": "Waiting for its turn"
         }
       },
       "zone_target": {
