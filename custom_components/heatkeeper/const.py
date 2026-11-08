@@ -66,6 +66,7 @@ ZONE_DISABLED: Final = "disabled"
 ZONE_NO_SENSOR: Final = "no_sensor"
 ZONE_BLOCKED: Final = "blocked"
 ZONE_MANUAL_OFF: Final = "manual_off"
+ZONE_QUEUED: Final = "queued"
 ZONE_STATUSES: Final = [
     ZONE_HEATING,
     ZONE_IDLE,
@@ -77,6 +78,7 @@ ZONE_STATUSES: Final = [
     ZONE_NO_SENSOR,
     ZONE_BLOCKED,
     ZONE_MANUAL_OFF,
+    ZONE_QUEUED,
 ]
 
 # One-shot heat state of a zone.

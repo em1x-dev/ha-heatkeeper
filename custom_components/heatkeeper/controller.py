@@ -111,6 +111,7 @@ from .const import (
     ZONE_MANUAL_OFF,
     ZONE_NO_SENSOR,
     ZONE_OFF,
+    ZONE_QUEUED,
     ZONE_SCHEDULED,
     ZONE_TARGETS,
 )
@@ -227,6 +228,9 @@ class HeatKeeperController:
         )
         self._unsubs: list[CALLBACK_TYPE] = []
         self._wakeups: list[CALLBACK_TYPE] = []
+        # Heaters start one at a time: no new start before this moment.
+        self._next_start: datetime | None = None
+        self._start_wakeup: CALLBACK_TYPE | None = None
         self._started_at: datetime | None = None
         self._lock = asyncio.Lock()
         self._pending = False
@@ -317,6 +321,9 @@ class HeatKeeperController:
             unsub()
         self._unsubs.clear()
         self._wakeups.clear()
+        if self._start_wakeup:
+            self._start_wakeup()
+            self._start_wakeup = None
         # Flush pending changes so a reload does not lose them.
         await self._store.async_save(self._data_to_save())
 
@@ -771,21 +778,26 @@ class HeatKeeperController:
         zone.status = ZONE_HEATING if desired else ZONE_IDLE
         return desired
 
-    async def _apply(self, zone: Zone, desired: bool | None, now: datetime) -> None:
-        if desired is None:
-            return
-        is_on = self._heater_on(zone)
-        if is_on is None:
-            return
-        if is_on == desired:
-            zone.last_command = None
-            return
-        if (
+    def _command_pending(self, zone: Zone, desired: bool, now: datetime) -> bool:
+        """True while the same command was sent recently and not yet confirmed."""
+        return (
             zone.last_command is not None
             and zone.last_command[0] == desired
             and now - zone.last_command[1] < timedelta(seconds=COMMAND_RETRY_SECONDS)
-        ):
-            return
+        )
+
+    async def _apply(self, zone: Zone, desired: bool | None, now: datetime) -> bool:
+        """Switch the heater if needed; True when a command was sent."""
+        if desired is None:
+            return False
+        is_on = self._heater_on(zone)
+        if is_on is None:
+            return False
+        if is_on == desired:
+            zone.last_command = None
+            return False
+        if self._command_pending(zone, desired, now):
+            return False
         zone.last_command = (desired, now)
         domain = split_entity_id(zone.heater)[0]
         _LOGGER.debug("%s: turning heater %s", zone.name, "on" if desired else "off")
@@ -795,6 +807,39 @@ class HeatKeeperController:
             {ATTR_ENTITY_ID: zone.heater},
             blocking=False,
         )
+        return True
+
+    async def _safe_apply(self, zone: Zone, desired: bool | None, now: datetime) -> bool:
+        try:
+            return await self._apply(zone, desired, now)
+        except Exception:  # noqa: BLE001 - keep controlling other zones
+            _LOGGER.exception("Failed to switch heater %s", zone.heater)
+            return False
+
+    def _start_allowed(self, now: datetime) -> bool:
+        return (
+            not self.settings[S_RESTORE_STAGGER]
+            or self._next_start is None
+            or now >= self._next_start
+        )
+
+    def _note_start(self, now: datetime) -> None:
+        """Hold further starts for the stagger interval and wake up after it."""
+        step = self.settings[S_RESTORE_STAGGER]
+        if not step:
+            return
+        self._next_start = now + timedelta(seconds=step)
+        if self._start_wakeup:
+            self._start_wakeup()
+
+        @callback
+        def _wake(when: datetime) -> None:
+            self._start_wakeup = None
+            self.async_request_evaluate()
+
+        self._start_wakeup = async_track_point_in_time(
+            self.hass, _wake, self._next_start
+        )
 
     async def _evaluate(self) -> None:
         now = dt_util.utcnow()
@@ -802,13 +847,28 @@ class HeatKeeperController:
         self.cheap = self._is_cheap(now_local)
         self._update_grid(now)
 
+        starts: list[Zone] = []
         for zone in self.zones.values():
             desired = self._decide(zone, now, now_local)
-            try:
-                await self._apply(zone, desired, now)
-            except Exception:  # noqa: BLE001 - keep controlling other zones
-                _LOGGER.exception("Failed to switch heater %s", zone.heater)
+            if desired and self._heater_on(zone) is False:
+                starts.append(zone)
+            else:
+                await self._safe_apply(zone, desired, now)
             zone.force_off_once = False
+
+        # Start heaters one by one, the coldest (relative to its target) first,
+        # so many rooms switching on together do not hit the supply at once.
+        starts.sort(
+            key=lambda z: (z.target or 0) - (z.current_temperature or 0), reverse=True
+        )
+        for zone in starts:
+            if not self._command_pending(zone, True, now) and not self._start_allowed(
+                now
+            ):
+                zone.status = ZONE_QUEUED
+                continue
+            if await self._safe_apply(zone, True, now):
+                self._note_start(now)
 
         # Recovery may have finished in this pass.
         self._update_grid(now)

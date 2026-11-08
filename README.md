@@ -56,9 +56,19 @@ Every target is set **per room**. The hysteresis (±) is shared.
 2. Power is back → all plugs are switched **off** right away, because smart plugs often turn
    themselves on after power returns. Then the **delay after power returns** runs.
 3. After the delay:
-   - **auto restore on** → rooms start one by one, spaced by *stagger between rooms*.
+   - **auto restore on** → rooms start one by one, spaced by *stagger between room starts*.
      Each room first heats to its *after-outage target* (`0` = skip), then returns to normal maintenance;
    - **auto restore off** → **paused** until you press **Resume heating**.
+
+### Staggered start
+
+Heaters are never switched on together. When several rooms need heat at once (the cheap zone starts,
+the pre-morning boost begins, the mode or presence changes, Home Assistant restarts), they start
+one by one, spaced by **Stagger between room starts** (`number.heatkeeper_restore_stagger`, 30 s by default),
+the coldest room relative to its target first. A room waiting for its turn shows **Waiting for its turn**.
+`0` switches staggering off.
+
+This smooths the moment of switching on only: once all rooms are heating, the total load is the same.
 
 ### Turning a heater off by hand
 
@@ -124,7 +134,8 @@ Entity ids do not depend on the UI language. `<room>` is the room name as a slug
 | `button.heatkeeper_resume` | Resume heating after an outage |
 | `number.heatkeeper_delta` | Hysteresis (±) |
 | `time.heatkeeper_cheap_start`, `time.heatkeeper_cheap_end`, `number.heatkeeper_preheat_lead` | Cheap tariff: start, end, boost before end |
-| `switch.heatkeeper_auto_restore`, `number.heatkeeper_restore_delay`, `number.heatkeeper_restore_stagger` | Outage: auto restore, delay, stagger |
+| `switch.heatkeeper_auto_restore`, `number.heatkeeper_restore_delay` | Outage: auto restore, delay |
+| `number.heatkeeper_restore_stagger` | Stagger between room starts |
 | `sensor.heatkeeper_status`, `binary_sensor.heatkeeper_cheap_tariff`, `binary_sensor.heatkeeper_grid`, `sensor.heatkeeper_restore_at` | Status |
 
 **Each room:**
